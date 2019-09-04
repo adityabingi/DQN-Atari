@@ -30,5 +30,5 @@ class Config:
 	train_frequency = 4
 	print_frequency = 1000
 	
-	evaluation_steps = 10000
+	evaluation_episodes = 100
 	atari_obs_shape = (84,84,4) # Last four frames stacked 84 x 84 grayscale images

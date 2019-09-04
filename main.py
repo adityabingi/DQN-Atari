@@ -29,7 +29,7 @@ train_freq          = Config.train_frequency
 update_target_freq  = Config.update_target_frequency
 eval_freq           = Config.evaluation_frequency
 print_freq          = Config.print_frequency
-eval_steps          = Config.evaluation_steps
+eval_episodes       = Config.evaluation_episodes
 
 
 def LinearSchedule(timestep):
@@ -47,23 +47,23 @@ def LinearSchedule(timestep):
 
 	return epsilon
 
-def train(agent, env, sess, saver):
+def train(agent, env, sess):
 
+	saver = tf.compat.v1.train.Saver(max_to_keep=3)
 	train_env = wrap_deepmind(env, frame_stack=True)
 	sess.run(agent.init)
 	print("Initialized with new values")
 
 	sess.run(agent.update_target)
 
-	train_writer = tf.summary.FileWriter(summariesDir+'train', sess.graph)
-	test_writer = tf.summary.FileWriter(summariesDir+'eval')
+	train_writer = tf.compat.v1.summary.FileWriter(summariesDir+'train', sess.graph)
+	test_writer = tf.compat.v1.summary.FileWriter(summariesDir+'eval')
 
 	replaybuffer = ReplayBuffer(size=replay_size)
 	obs = train_env.reset()
 
 	episode_rewards = [0.0]
 	max_mean_reward = None
-	saved_eval_reward = None
 	snapshotID = 0
 
 	for t in range(total_time_steps):
@@ -103,11 +103,8 @@ def train(agent, env, sess, saver):
 
 		if (t > initial_steps and t % eval_freq==0):
 			eval_mean_reward = evaluate(agent, env, sess, saver)
-			if(saved_eval_reward is None or  eval_mean_reward > saved_eval_reward):
-				saved_eval_reward = eval_mean_reward
-				snapshotID += 1
-				saver.save(sess, modelDir+'snapshot', global_step = snapshotID)
-
+			snapshotID += 1
+			saver.save(sess, modelDir+'snapshot', global_step = snapshotID)
 			print("Evaluation reward at {} step is {}".format(t, eval_mean_reward))
 			evaluation_summary = sess.run(agent.eval_summary, feed_dict={agent.eval_reward_ph:eval_mean_reward})
 			test_writer.add_summary(evaluation_summary, t)		
@@ -122,9 +119,10 @@ def train(agent, env, sess, saver):
 			train_writer.add_summary(perf_summary,  t)
 
 
-def evaluate(agent, env, sess, saver, restore=False, eval_steps=eval_steps):
+def evaluate(agent, env, sess, restore=False, eval_episodes=eval_episodes, play=False):
 
 	if restore:
+		saver = tf.compat.v1.train.Saver()
 		latestSnapshot = tf.train.latest_checkpoint(modelDir)
 		if not latestSnapshot:
 			raise Exception('No saved model found in: ' + modelDir)
@@ -132,33 +130,39 @@ def evaluate(agent, env, sess, saver, restore=False, eval_steps=eval_steps):
 		saver.restore(sess, latestSnapshot)
 		print("Restored saved model from latest snapshot")
 
-	eval_env = wrap_deepmind(env, episode_life=False, clip_rewards=False, frame_stack=True)
+	eval_env = wrap_deepmind(env, episode_life=False, clip_rewards=False, frame_stack=True, evaluate=True)
 
 	obs = eval_env.reset()	
 	eval_episode_rewards=[0.0]
 
-	for i in range(eval_steps):
+	while (True):
 
 		action = sess.run(agent.choose_action, feed_dict={agent.obs_input_ph:np.array(obs)[None,:], agent.epsilon_ph:evaluation_ep})
 		next_obs, reward, done, info = eval_env.step(action)
 		eval_episode_rewards[-1] += reward
 		obs = next_obs
 
-		eval_mean_reward = np.mean(eval_episode_rewards)
+		eval_mean_reward = np.mean(eval_episode_rewards)	
 
 		if done:
 			obs = eval_env.reset()
+			no_of_episodes = len(eval_episode_rewards)
+			if(restore):
+				print("Mean reward after {} episodes is {}".format(no_of_episodes, round(eval_mean_reward, 2)))
+			if(play):
+				break
+			if(no_of_episodes>=eval_episodes):
+				break
 			eval_episode_rewards.append(0.0)
 
 	return round(eval_mean_reward, 2)
 
 def make_session():
 
-	config = tf.ConfigProto(allow_soft_placement=True) #log_device_placement=True)
+	config = tf.compat.v1.ConfigProto(allow_soft_placement=True) #log_device_placement=True)
 	config.gpu_options.allow_growth = True
-	sess  = tf.Session(config=config)
-	saver = tf.train.Saver(max_to_keep=3)
-	return sess, saver
+	sess  = tf.compat.v1.Session(config=config)
+	return sess
 
 def main():
 
@@ -176,20 +180,20 @@ def main():
 	n_actions = env.action_space.n
 	agent = DQN(n_actions)
 	
-	sess, saver = make_session()
+	sess = make_session()
 
 	if(args.train):
-		train(agent, env, sess, saver)
+		train(agent, env, sess)
 
 	if(args.evaluate):
 
-		#test_env = gym.wrappers.Monitor(env, saveVideoDir+'testing', force=True)
-		evaluate(agent, env, sess, saver, restore=True)
-		#test_env.close()
+		test_env = gym.wrappers.Monitor(env, saveVideoDir+'testing', force=True)
+		evaluate(agent, test_env, sess, restore=True)
+		test_env.close()
 
 	if(args.play):
 		play_env = gym.wrappers.Monitor(env, saveVideoDir+'play', force=True)
-		evaluate(agent, play_env, sess, saver, restore=True)
+		evaluate(agent, play_env, sess, restore=True, play=True)
 		play_env.close()	
 
 	env.close()
