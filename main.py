@@ -130,7 +130,7 @@ def evaluate(agent, env, sess, restore=False, eval_episodes=eval_episodes, play=
 		saver.restore(sess, latestSnapshot)
 		print("Restored saved model from latest snapshot")
 
-	eval_env = wrap_deepmind(env, episode_life=False, clip_rewards=False, frame_stack=True, evaluate=True)
+	eval_env = wrap_deepmind(env, episode_life=False, clip_rewards=False, frame_stack=True, no_op_reset=True)
 
 	obs = eval_env.reset()	
 	eval_episode_rewards=[0.0]
@@ -168,13 +168,13 @@ def main():
 
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--train', help='train an agent to find optimal policy', action='store_true')
-	parser.add_argument('--evaluate', help='evaluate trained policy of an agent', action='store_true')
+	parser.add_argument('--evaluate', nargs=1, help='evaluates trained policy, pass no of evaluation_episodes as argument', type=int)
 	parser.add_argument('--play', help='let trained agent play', action='store_true')
-	parser.add_argument('--env', nargs=1, help='env used for DQN', type=str)
+	parser.add_argument('--env', nargs=1, help='env used to train or evaluate', type=str)
 
 	args = parser.parse_args()
 
-	env_id = args.env[0] + 'NoFrameskip-v0'
+	env_id = args.env[0] 
 	env = make_atari(env_id)
 
 	n_actions = env.action_space.n
@@ -188,7 +188,9 @@ def main():
 	if(args.evaluate):
 
 		test_env = gym.wrappers.Monitor(env, saveVideoDir+'testing', force=True)
-		evaluate(agent, test_env, sess, restore=True)
+		evaluation_reward = evaluate(agent, test_env, sess, restore=True, eval_episodes=args.evaluate[0])
+		open(modelDir+'accuracy_{}.txt'.format(args.evaluate[0]), 'w').write('Average reward after evaluation of {} episodes is {}'.format(
+						args.evaluate[0], round(evaluation_reward, 1)))
 		test_env.close()
 
 	if(args.play):
